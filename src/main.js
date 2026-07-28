@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import './style.css';
 import './mobile.css';
+import './brightness.css';
 
 const $ = (selector) => document.querySelector(selector);
 const viewer = $('#viewer');
@@ -12,13 +13,31 @@ const loading = $('#loading');
 const loadingTitle = $('#loadingTitle');
 const loadingNote = $('#loadingNote');
 const toast = $('#toast');
+const outlineButton = document.createElement('button');
+outlineButton.className = 'tool';
+outlineButton.type = 'button';
+outlineButton.title = '顯示模型輪廓線';
+outlineButton.setAttribute('aria-label', '顯示模型輪廓線');
+outlineButton.innerHTML = '<svg viewBox="0 0 24 24"><path d="m12 2 8 4.5v9L12 20l-8-4.5v-9L12 2Z"/><path d="M4 6.5 12 11l8-4.5M4 15.5 12 20l8-4.5M12 11v9"/></svg>';
+$('#wireBtn').insertAdjacentElement('afterend', outlineButton);
+const shadowButton = document.createElement('button');
+shadowButton.className = 'tool active';
+shadowButton.type = 'button';
+shadowButton.title = '切換柔和陰影';
+shadowButton.setAttribute('aria-label', '切換柔和陰影');
+shadowButton.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6 2.1 2.1m0-12.8-2.1 2.1m-8.6 8.6-2.1 2.1"/><circle cx="12" cy="12" r="4"/></svg>';
+outlineButton.insertAdjacentElement('afterend', shadowButton);
 let model = null;
 let worker = null;
 let busy = false;
 let toastTimer;
 let interactionTimer;
 let lightBackground = false;
+let backgroundBrightness = 1;
 let rejectActiveParse = null;
+let outlineGroup = null;
+let outlineVisible = false;
+let shadowsVisible = true;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x090d12);
@@ -29,13 +48,18 @@ camera.up.set(0, 0, 1);
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 viewer.append(renderer.domElement);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.target.set(0, 0, 0);
-scene.add(new THREE.HemisphereLight(0xd9ecff, 0x5f7892, 2.4));
-const key = new THREE.DirectionalLight(0xffffff, 3.1); key.position.set(4, -5, 8); scene.add(key);
+const hemisphere = new THREE.HemisphereLight(0xd9ecff, 0x5f7892, 2.4); scene.add(hemisphere);
+const key = new THREE.DirectionalLight(0xffffff, 3.1); key.position.set(4, -5, 8); key.castShadow = true; scene.add(key);
+const keyTarget = new THREE.Object3D(); scene.add(keyTarget); key.target = keyTarget;
 const grid = new THREE.GridHelper(200, 20, 0x35536a, 0x1c2a35); grid.rotation.x = Math.PI / 2; scene.add(grid);
+const shadowGround = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.ShadowMaterial({ color: 0x000000, transparent: true, opacity: .26 }));
+shadowGround.receiveShadow = true; shadowGround.visible = false; scene.add(shadowGround);
 const axes = new THREE.AxesHelper(25); scene.add(axes);
 
 function setBackgroundTheme(useLight) {
@@ -43,15 +67,25 @@ function setBackgroundTheme(useLight) {
   const palette = useLight
     ? { background: 0xe7edf3, fog: 0xe7edf3, gridMajor: 0x8da4b7, gridMinor: 0xc6d3de, sky: 0xffffff, ground: 0xaabccb, key: 2.8 }
     : { background: 0x090d12, fog: 0x090d12, gridMajor: 0x35536a, gridMinor: 0x1c2a35, sky: 0xd9ecff, ground: 0x5f7892, key: 3.1 };
-  scene.background.setHex(palette.background); scene.fog.color.setHex(palette.fog);
+  const adjust = (hex) => new THREE.Color(hex).multiplyScalar(backgroundBrightness);
+  scene.background.copy(adjust(palette.background)); scene.fog.color.copy(adjust(palette.fog));
   const gridMaterials = Array.isArray(grid.material) ? grid.material : [grid.material];
-  gridMaterials[0].color.setHex(palette.gridMajor); gridMaterials[1]?.color.setHex(palette.gridMinor);
-  scene.children.find((item) => item.isHemisphereLight).color.setHex(palette.sky);
-  scene.children.find((item) => item.isHemisphereLight).groundColor.setHex(palette.ground);
+  gridMaterials[0].color.copy(adjust(palette.gridMajor)); gridMaterials[1]?.color.copy(adjust(palette.gridMinor));
+  hemisphere.color.copy(adjust(palette.sky)); hemisphere.groundColor.copy(adjust(palette.ground));
   key.intensity = palette.key;
   $('#themeBtn').classList.toggle('active', useLight);
   $('#themeBtn').title = useLight ? '切換深色背景' : '切換淺色背景';
 }
+
+const brightnessControl = document.createElement('label');
+brightnessControl.className = 'brightness-control';
+brightnessControl.innerHTML = '<span>背景亮度</span><input id="backgroundBrightness" type="range" min="35" max="140" value="100" aria-label="背景亮度">';
+mainElement.append(brightnessControl);
+const brightnessInput = brightnessControl.querySelector('input');
+brightnessInput.addEventListener('input', () => {
+  backgroundBrightness = Number(brightnessInput.value) / 100;
+  setBackgroundTheme(lightBackground);
+});
 
 function resize() { const { clientWidth: w, clientHeight: h } = viewer; camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setSize(w, h, false); }
 addEventListener('resize', resize); resize();
@@ -69,8 +103,36 @@ function disposeObject(object) {
 }
 function clearModel() {
   if (!model) return;
+  disposeOutlines();
   scene.remove(model); disposeObject(model); model = null;
   $('#infoCard').classList.add('hidden'); $('#clearBtn').hidden = true; dropZone.classList.remove('compact');
+}
+function disposeOutlines() {
+  if (!outlineGroup) return;
+  outlineGroup.traverse((item) => { item.geometry?.dispose(); item.material?.dispose(); });
+  outlineGroup.removeFromParent();
+  outlineGroup = null;
+}
+function setOutlines(enabled) {
+  outlineVisible = enabled;
+  outlineButton.classList.toggle('active', enabled);
+  if (!model) return;
+  if (!enabled) { if (outlineGroup) outlineGroup.visible = false; return; }
+  if (!outlineGroup) {
+    outlineGroup = new THREE.Group();
+    outlineGroup.name = 'CAD outlines';
+    model.traverse((item) => {
+      if (!item.isMesh || !item.geometry) return;
+      // Draw only meaningful CAD creases; this avoids the noisy triangle-by-triangle wireframe.
+      const geometry = new THREE.EdgesGeometry(item.geometry, 25);
+      const material = new THREE.LineBasicMaterial({ color: 0x101820, transparent: true, opacity: .78 });
+      const edges = new THREE.LineSegments(geometry, material);
+      edges.renderOrder = 2;
+      outlineGroup.add(edges);
+    });
+    model.add(outlineGroup);
+  }
+  outlineGroup.visible = true;
 }
 function fitCamera() {
   if (!model) return;
@@ -92,8 +154,22 @@ function updateHelpers() {
   // grid underneath the imported part and scale both helpers to the model.
   grid.scale.setScalar(helperScale);
   grid.position.set(center.x, center.y, box.min.z - largestDimension * .003);
+  shadowGround.scale.setScalar(helperScale);
+  shadowGround.position.copy(grid.position);
+  shadowGround.visible = shadowsVisible;
   axes.scale.setScalar(helperScale);
   axes.position.set(box.min.x, box.min.y, box.min.z);
+
+  key.position.copy(center).add(new THREE.Vector3(largestDimension, -largestDimension * 1.2, largestDimension * 1.6));
+  keyTarget.position.copy(center); keyTarget.updateMatrixWorld();
+  const shadowRange = largestDimension * 1.25;
+  const shadowCamera = key.shadow.camera;
+  shadowCamera.left = shadowCamera.bottom = -shadowRange;
+  shadowCamera.right = shadowCamera.top = shadowRange;
+  shadowCamera.near = Math.max(largestDimension * .01, .01);
+  shadowCamera.far = largestDimension * 5;
+  shadowCamera.updateProjectionMatrix();
+  key.shadow.mapSize.set(largestDimension > 10000 ? 1024 : 2048);
 }
 function formatSize(value) { return value >= 1000 ? value.toFixed(0) : value >= 10 ? value.toFixed(1) : value.toFixed(2); }
 function qualityParams() {
@@ -102,6 +178,7 @@ function qualityParams() {
     balanced: { linearDeflection: .0015, angularDeflection: .28 },
     fine: { linearDeflection: .00055, angularDeflection: .16 },
     ultra: { linearDeflection: .0002, angularDeflection: .09 },
+    maximum: { linearDeflection: .00005, angularDeflection: .035 },
   }[$('#qualitySelect').value];
 }
 function buildModel(meshes) {
@@ -110,8 +187,8 @@ function buildModel(meshes) {
     const geometry = new THREE.BufferGeometry(); geometry.setAttribute('position', new THREE.BufferAttribute(source.position, 3));
     if (source.normal) geometry.setAttribute('normal', new THREE.BufferAttribute(source.normal, 3)); else geometry.computeVertexNormals();
     geometry.setIndex(new THREE.BufferAttribute(source.index, 1)); geometry.computeBoundingSphere();
-    const material = new THREE.MeshStandardMaterial({ color: source.color ? new THREE.Color(...source.color) : 0xa4c4d7, metalness: .06, roughness: .48, side: THREE.DoubleSide });
-    const mesh = new THREE.Mesh(geometry, material); mesh.name = source.name; group.add(mesh); triangles += source.index.length / 3;
+    const material = new THREE.MeshStandardMaterial({ color: source.color ? new THREE.Color(...source.color) : 0xa4c4d7, metalness: .06, roughness: .48, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+    const mesh = new THREE.Mesh(geometry, material); mesh.name = source.name; mesh.castShadow = true; mesh.receiveShadow = true; group.add(mesh); triangles += source.index.length / 3;
   });
   return { group, triangles };
 }
@@ -138,13 +215,14 @@ async function openFile(file) {
   busy = true; fileInput.disabled = true; $('#qualitySelect').disabled = true;
   try {
     if (file.size > 100 * 1024 * 1024) showError('大型檔案會使用較多瀏覽器記憶體；解析速度取決於裝置與模型複雜度。');
+    if ($('#qualitySelect').value === 'maximum') showError('極致+ 會產生顯著更多三角形，可能需要較長時間與更多記憶體。');
     setLoading('讀取檔案', '正在從您的裝置讀取檔案，不會上傳。');
     const buffer = await file.arrayBuffer();
     setLoading('解析模型', 'OpenCascade WebAssembly 正在此瀏覽器內解析 STEP。');
     const meshes = await parseInWorker(buffer);
     setLoading('建立幾何', '正在建立 Three.js 模型。');
     clearModel();
-    const result = buildModel(meshes); setRenderDensity(result.triangles); model = result.group; scene.add(model); updateHelpers(); fitCamera();
+    const result = buildModel(meshes); setRenderDensity(result.triangles); model = result.group; scene.add(model); if (outlineVisible) setOutlines(true); updateHelpers(); fitCamera();
     const dimensions = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3());
     $('#fileName').textContent = file.name; $('#meshes').textContent = meshes.length.toLocaleString(); $('#faces').textContent = Math.floor(result.triangles).toLocaleString();
     $('#size').textContent = `${formatSize(dimensions.x)} × ${formatSize(dimensions.y)} × ${formatSize(dimensions.z)}`;
@@ -162,6 +240,12 @@ fileInput.addEventListener('change', () => openFile(fileInput.files[0]));
 $('#clearBtn').addEventListener('click', clearModel); $('#fitBtn').addEventListener('click', fitCamera); $('#resetBtn').addEventListener('click', fitCamera);
 $('#solidBtn').addEventListener('click', () => { model?.traverse((x) => { if (x.isMesh) x.material.wireframe = false; }); $('#solidBtn').classList.add('active'); $('#wireBtn').classList.remove('active'); });
 $('#wireBtn').addEventListener('click', () => { model?.traverse((x) => { if (x.isMesh) x.material.wireframe = true; }); $('#wireBtn').classList.add('active'); $('#solidBtn').classList.remove('active'); });
+outlineButton.addEventListener('click', () => setOutlines(!outlineVisible));
+shadowButton.addEventListener('click', () => {
+  shadowsVisible = !shadowsVisible;
+  shadowGround.visible = shadowsVisible && Boolean(model);
+  shadowButton.classList.toggle('active', shadowsVisible);
+});
 $('#gridBtn').addEventListener('click', () => { grid.visible = !grid.visible; $('#gridBtn').classList.toggle('active', grid.visible); });
 $('#axisBtn').addEventListener('click', () => { axes.visible = !axes.visible; $('#axisBtn').classList.toggle('active', axes.visible); });
 $('#themeBtn').addEventListener('click', () => setBackgroundTheme(!lightBackground));
