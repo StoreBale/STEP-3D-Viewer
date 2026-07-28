@@ -27,3 +27,9 @@ node_modules/
 dist/
 public/vendor/occt-import-js.js
 public/vendor/occt-import-js.wasm
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+!.env.example
