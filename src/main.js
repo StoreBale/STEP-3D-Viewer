@@ -21,7 +21,7 @@ outlineButton.setAttribute('aria-label', '顯示模型輪廓線');
 outlineButton.innerHTML = '<svg viewBox="0 0 24 24"><path d="m12 2 8 4.5v9L12 20l-8-4.5v-9L12 2Z"/><path d="M4 6.5 12 11l8-4.5M4 15.5 12 20l8-4.5M12 11v9"/></svg>';
 $('#wireBtn').insertAdjacentElement('afterend', outlineButton);
 const shadowButton = document.createElement('button');
-shadowButton.className = 'tool active';
+shadowButton.className = 'tool';
 shadowButton.type = 'button';
 shadowButton.title = '切換柔和陰影';
 shadowButton.setAttribute('aria-label', '切換柔和陰影');
@@ -37,7 +37,9 @@ let backgroundBrightness = 1;
 let rejectActiveParse = null;
 let outlineGroup = null;
 let outlineVisible = false;
-let shadowsVisible = true;
+// Keep shadows opt-in: some large imported assemblies can make a full shadow
+// pass appear overly dark on constrained mobile GPUs.
+let shadowsVisible = false;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x090d12);
