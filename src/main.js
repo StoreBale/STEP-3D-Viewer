@@ -13,6 +13,13 @@ const loading = $('#loading');
 const loadingTitle = $('#loadingTitle');
 const loadingNote = $('#loadingNote');
 const toast = $('#toast');
+const outlineButton = document.createElement('button');
+outlineButton.className = 'tool';
+outlineButton.type = 'button';
+outlineButton.title = '顯示模型輪廓線';
+outlineButton.setAttribute('aria-label', '顯示模型輪廓線');
+outlineButton.innerHTML = '<svg viewBox="0 0 24 24"><path d="m12 2 8 4.5v9L12 20l-8-4.5v-9L12 2Z"/><path d="M4 6.5 12 11l8-4.5M4 15.5 12 20l8-4.5M12 11v9"/></svg>';
+$('#wireBtn').insertAdjacentElement('afterend', outlineButton);
 let model = null;
 let worker = null;
 let busy = false;
@@ -21,6 +28,8 @@ let interactionTimer;
 let lightBackground = false;
 let backgroundBrightness = 1;
 let rejectActiveParse = null;
+let outlineGroup = null;
+let outlineVisible = false;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x090d12);
@@ -81,8 +90,36 @@ function disposeObject(object) {
 }
 function clearModel() {
   if (!model) return;
+  disposeOutlines();
   scene.remove(model); disposeObject(model); model = null;
   $('#infoCard').classList.add('hidden'); $('#clearBtn').hidden = true; dropZone.classList.remove('compact');
+}
+function disposeOutlines() {
+  if (!outlineGroup) return;
+  outlineGroup.traverse((item) => { item.geometry?.dispose(); item.material?.dispose(); });
+  outlineGroup.removeFromParent();
+  outlineGroup = null;
+}
+function setOutlines(enabled) {
+  outlineVisible = enabled;
+  outlineButton.classList.toggle('active', enabled);
+  if (!model) return;
+  if (!enabled) { if (outlineGroup) outlineGroup.visible = false; return; }
+  if (!outlineGroup) {
+    outlineGroup = new THREE.Group();
+    outlineGroup.name = 'CAD outlines';
+    model.traverse((item) => {
+      if (!item.isMesh || !item.geometry) return;
+      // Draw only meaningful CAD creases; this avoids the noisy triangle-by-triangle wireframe.
+      const geometry = new THREE.EdgesGeometry(item.geometry, 25);
+      const material = new THREE.LineBasicMaterial({ color: 0x101820, transparent: true, opacity: .78 });
+      const edges = new THREE.LineSegments(geometry, material);
+      edges.renderOrder = 2;
+      outlineGroup.add(edges);
+    });
+    model.add(outlineGroup);
+  }
+  outlineGroup.visible = true;
 }
 function fitCamera() {
   if (!model) return;
@@ -123,7 +160,7 @@ function buildModel(meshes) {
     const geometry = new THREE.BufferGeometry(); geometry.setAttribute('position', new THREE.BufferAttribute(source.position, 3));
     if (source.normal) geometry.setAttribute('normal', new THREE.BufferAttribute(source.normal, 3)); else geometry.computeVertexNormals();
     geometry.setIndex(new THREE.BufferAttribute(source.index, 1)); geometry.computeBoundingSphere();
-    const material = new THREE.MeshStandardMaterial({ color: source.color ? new THREE.Color(...source.color) : 0xa4c4d7, metalness: .06, roughness: .48, side: THREE.DoubleSide });
+    const material = new THREE.MeshStandardMaterial({ color: source.color ? new THREE.Color(...source.color) : 0xa4c4d7, metalness: .06, roughness: .48, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
     const mesh = new THREE.Mesh(geometry, material); mesh.name = source.name; group.add(mesh); triangles += source.index.length / 3;
   });
   return { group, triangles };
@@ -158,7 +195,7 @@ async function openFile(file) {
     const meshes = await parseInWorker(buffer);
     setLoading('建立幾何', '正在建立 Three.js 模型。');
     clearModel();
-    const result = buildModel(meshes); setRenderDensity(result.triangles); model = result.group; scene.add(model); updateHelpers(); fitCamera();
+    const result = buildModel(meshes); setRenderDensity(result.triangles); model = result.group; scene.add(model); if (outlineVisible) setOutlines(true); updateHelpers(); fitCamera();
     const dimensions = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3());
     $('#fileName').textContent = file.name; $('#meshes').textContent = meshes.length.toLocaleString(); $('#faces').textContent = Math.floor(result.triangles).toLocaleString();
     $('#size').textContent = `${formatSize(dimensions.x)} × ${formatSize(dimensions.y)} × ${formatSize(dimensions.z)}`;
@@ -176,6 +213,7 @@ fileInput.addEventListener('change', () => openFile(fileInput.files[0]));
 $('#clearBtn').addEventListener('click', clearModel); $('#fitBtn').addEventListener('click', fitCamera); $('#resetBtn').addEventListener('click', fitCamera);
 $('#solidBtn').addEventListener('click', () => { model?.traverse((x) => { if (x.isMesh) x.material.wireframe = false; }); $('#solidBtn').classList.add('active'); $('#wireBtn').classList.remove('active'); });
 $('#wireBtn').addEventListener('click', () => { model?.traverse((x) => { if (x.isMesh) x.material.wireframe = true; }); $('#wireBtn').classList.add('active'); $('#solidBtn').classList.remove('active'); });
+outlineButton.addEventListener('click', () => setOutlines(!outlineVisible));
 $('#gridBtn').addEventListener('click', () => { grid.visible = !grid.visible; $('#gridBtn').classList.toggle('active', grid.visible); });
 $('#axisBtn').addEventListener('click', () => { axes.visible = !axes.visible; $('#axisBtn').classList.toggle('active', axes.visible); });
 $('#themeBtn').addEventListener('click', () => setBackgroundTheme(!lightBackground));
