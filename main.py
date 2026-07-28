@@ -23,6 +23,7 @@ from urllib.parse import parse_qs, urlsplit
 
 IS_CLOUD = bool(os.environ.get("RENDER") or os.environ.get("CI"))
 HOST = os.environ.get("HOST", "0.0.0.0" if IS_CLOUD else "127.0.0.1")
+# Hosting providers (including Render) supply PORT and retain control of their port.
 PORT = int(os.environ.get("PORT", os.environ.get("STEP_VIEWER_PORT", "8000")))
 MAX_UPLOAD_MB = max(1, min(int(os.environ.get("MAX_UPLOAD_MB", "200")), 500))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
@@ -302,6 +303,9 @@ INDEX_HTML = r"""<!doctype html>
         <button class="tool active" id="axisBtn" title="顯示座標軸">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 19 19 5M5 19V7m0 12h12"/><path d="m15 5 4 0 0 4"/></svg>
         </button>
+        <button class="tool" id="themeBtn" title="切換淺色背景">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4m0-14.2-1.4 1.4M6.3 17.7l-1.4 1.4"/></svg>
+        </button>
         <div class="divider"></div>
         <button class="tool" id="fitBtn" title="重設視角">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 3H3v5m13-5h5v5M8 21H3v-5m13 5h5v-5"/></svg>
@@ -362,6 +366,7 @@ INDEX_HTML = r"""<!doctype html>
     const wireBtn = document.querySelector('#wireBtn');
     const gridBtn = document.querySelector('#gridBtn');
     const axisBtn = document.querySelector('#axisBtn');
+    const themeBtn = document.querySelector('#themeBtn');
     const qualitySelect = document.querySelector('#qualitySelect');
 
     const scene = new THREE.Scene();
@@ -384,13 +389,18 @@ INDEX_HTML = r"""<!doctype html>
     controls.dampingFactor = .07;
     controls.screenSpacePanning = true;
 
-    scene.add(new THREE.HemisphereLight(0xd9ecff, 0x17202a, 2.0));
+    // Ground and fill lights make recessed and underside faces readable.
+    const hemi = new THREE.HemisphereLight(0xd9ecff, 0x5f7892, 2.35);
+    scene.add(hemi);
     const key = new THREE.DirectionalLight(0xffffff, 3.2);
     key.position.set(4, -5, 8);
     scene.add(key);
     const rim = new THREE.DirectionalLight(0x6de4c6, 2.0);
     rim.position.set(-5, 2, 3);
     scene.add(rim);
+    const fill = new THREE.DirectionalLight(0xbfd9ff, 1.7);
+    fill.position.set(-3, 4, -6);
+    scene.add(fill);
 
     const grid = new THREE.GridHelper(200, 20, 0x35536a, 0x1c2a35);
     grid.rotation.x = Math.PI / 2;
@@ -399,6 +409,27 @@ INDEX_HTML = r"""<!doctype html>
     scene.add(grid);
     const axes = new THREE.AxesHelper(25);
     scene.add(axes);
+
+    let lightBackground = false;
+    function setBackgroundTheme(useLight) {
+      lightBackground = useLight;
+      const palette = useLight
+        ? { background: 0xe7edf3, fog: 0xe7edf3, gridMajor: 0x8da4b7, gridMinor: 0xc6d3de, sky: 0xffffff, ground: 0xaabccb, key: 2.8, rim: 1.35, fill: 2.4, exposure: 1.16 }
+        : { background: 0x090d12, fog: 0x090d12, gridMajor: 0x35536a, gridMinor: 0x1c2a35, sky: 0xd9ecff, ground: 0x5f7892, key: 3.2, rim: 2.0, fill: 1.7, exposure: 1.08 };
+      scene.background.setHex(palette.background);
+      scene.fog.color.setHex(palette.fog);
+      const gridMaterials = Array.isArray(grid.material) ? grid.material : [grid.material];
+      gridMaterials[0].color.setHex(palette.gridMajor);
+      gridMaterials[1]?.color.setHex(palette.gridMinor);
+      hemi.color.setHex(palette.sky);
+      hemi.groundColor.setHex(palette.ground);
+      key.intensity = palette.key;
+      rim.intensity = palette.rim;
+      fill.intensity = palette.fill;
+      renderer.toneMappingExposure = palette.exposure;
+      themeBtn.classList.toggle('active', useLight);
+      themeBtn.title = useLight ? '切換深色背景' : '切換淺色背景';
+    }
 
     let model = null;
     let modelSize = 100;
@@ -471,6 +502,8 @@ INDEX_HTML = r"""<!doctype html>
     function updateHelpers(size) {
       modelSize = size;
       grid.scale.setScalar(Math.max(size / 100, .01));
+      // Keep the floor just below the model to prevent z-fighting at its base.
+      grid.position.z = -Math.max(size * .003, .01);
       axes.scale.setScalar(Math.max(size / 100, .01));
     }
 
@@ -571,6 +604,7 @@ INDEX_HTML = r"""<!doctype html>
     axisBtn.addEventListener('click', () => {
       axes.visible = !axes.visible; axisBtn.classList.toggle('active', axes.visible);
     });
+    themeBtn.addEventListener('click', () => setBackgroundTheme(!lightBackground));
     document.querySelector('#hideUiBtn').addEventListener('click', () => {
       document.body.classList.add('ui-hidden');
     });
@@ -793,8 +827,22 @@ class StepViewerHandler(BaseHTTPRequestHandler):
             self._send_error_text(HTTPStatus.INTERNAL_SERVER_ERROR, "伺服器發生未預期的錯誤。")
 
 
+class StepViewerServer(ThreadingHTTPServer):
+    """Permit an immediate restart after the previous local server exits."""
+
+    allow_reuse_address = True
+
+
 def main() -> None:
-    server = ThreadingHTTPServer((HOST, PORT), StepViewerHandler)
+    try:
+        server = StepViewerServer((HOST, PORT), StepViewerHandler)
+    except OSError as exc:
+        if exc.errno in {48, 98, 10013, 10048}:
+            raise SystemExit(
+                f"Port {PORT} is already in use. Stop the previous Python process "
+                f"or start with STEP_VIEWER_PORT=<another port>."
+            ) from exc
+        raise
     url = f"http://{HOST}:{PORT}"
     print("STEP 3D Viewer 已啟動")
     print(f"請開啟：{url}")
