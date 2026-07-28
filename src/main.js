@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import './style.css';
 import './mobile.css';
 import './brightness.css';
+import './light-workspace.css';
 
 const $ = (selector) => document.querySelector(selector);
 const viewer = $('#viewer');
@@ -25,7 +26,7 @@ let worker = null;
 let busy = false;
 let toastTimer;
 let interactionTimer;
-let lightBackground = false;
+let lightBackground = true;
 let backgroundBrightness = 1;
 let rejectActiveParse = null;
 let outlineGroup = null;
@@ -51,6 +52,7 @@ const axes = new THREE.AxesHelper(25); scene.add(axes);
 
 function setBackgroundTheme(useLight) {
   lightBackground = useLight;
+  document.body.classList.toggle('light-workspace', useLight);
   const palette = useLight
     ? { background: 0xe7edf3, fog: 0xe7edf3, gridMajor: 0x8da4b7, gridMinor: 0xc6d3de, sky: 0xffffff, ground: 0xaabccb, key: 2.8 }
     : { background: 0x090d12, fog: 0x090d12, gridMajor: 0x35536a, gridMinor: 0x1c2a35, sky: 0xd9ecff, ground: 0x5f7892, key: 3.1 };
@@ -73,6 +75,7 @@ brightnessInput.addEventListener('input', () => {
   backgroundBrightness = Number(brightnessInput.value) / 100;
   setBackgroundTheme(lightBackground);
 });
+setBackgroundTheme(true);
 
 function resize() { const { clientWidth: w, clientHeight: h } = viewer; camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setSize(w, h, false); }
 addEventListener('resize', resize); resize();
