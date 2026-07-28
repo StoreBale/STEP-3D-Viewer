@@ -78,6 +78,21 @@ function fitCamera() {
   camera.near = Math.max(distance / 1000, .001); camera.far = Math.max(distance * 100, 1000); camera.updateProjectionMatrix();
   controls.target.copy(sphere.center); controls.maxDistance = distance * 12; controls.update();
 }
+function updateHelpers() {
+  if (!model) return;
+  const box = new THREE.Box3().setFromObject(model);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const largestDimension = Math.max(size.x, size.y, size.z, 1);
+  const helperScale = Math.max(largestDimension / 100, .01);
+
+  // STEP coordinates are not necessarily centred at the world origin. Keep the
+  // grid underneath the imported part and scale both helpers to the model.
+  grid.scale.setScalar(helperScale);
+  grid.position.set(center.x, center.y, box.min.z - largestDimension * .003);
+  axes.scale.setScalar(helperScale);
+  axes.position.set(box.min.x, box.min.y, box.min.z);
+}
 function formatSize(value) { return value >= 1000 ? value.toFixed(0) : value >= 10 ? value.toFixed(1) : value.toFixed(2); }
 function qualityParams() {
   return {
@@ -120,7 +135,7 @@ async function openFile(file) {
     const meshes = await parseInWorker(buffer);
     setLoading('建立幾何', '正在建立 Three.js 模型。');
     clearModel();
-    const result = buildModel(meshes); model = result.group; scene.add(model); fitCamera();
+    const result = buildModel(meshes); model = result.group; scene.add(model); updateHelpers(); fitCamera();
     const dimensions = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3());
     $('#fileName').textContent = file.name; $('#meshes').textContent = meshes.length.toLocaleString(); $('#faces').textContent = Math.floor(result.triangles).toLocaleString();
     $('#size').textContent = `${formatSize(dimensions.x)} × ${formatSize(dimensions.y)} × ${formatSize(dimensions.z)}`;
