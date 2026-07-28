@@ -18,6 +18,7 @@ let busy = false;
 let toastTimer;
 let interactionTimer;
 let lightBackground = false;
+let rejectActiveParse = null;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x090d12);
@@ -114,8 +115,15 @@ function buildModel(meshes) {
   });
   return { group, triangles };
 }
+function setRenderDensity(triangles) {
+  // High-density displays multiply the fragment workload dramatically on large CAD meshes.
+  const maxDensity = triangles > 1_000_000 ? 1 : triangles > 250_000 ? 1.4 : 2;
+  renderer.setPixelRatio(Math.min(devicePixelRatio, maxDensity));
+  resize();
+}
 function parseInWorker(buffer) {
   return new Promise((resolve, reject) => {
+    rejectActiveParse = reject;
     const url = new URL('./vendor/step-worker.js', window.location.href);
     worker = new Worker(url);
     worker.onmessage = ({ data }) => data.type === 'complete' ? resolve(data.meshes) : reject(new Error(data.message));
@@ -127,7 +135,7 @@ async function openFile(file) {
   if (busy || !file) return;
   if (!/\.(stp|step)$/i.test(file.name)) return showError('請選擇副檔名為 .stp 或 .step 的檔案。');
   if (!file.size) return showError('此 STEP 檔案是空白的。');
-  busy = true; fileInput.disabled = true;
+  busy = true; fileInput.disabled = true; $('#qualitySelect').disabled = true;
   try {
     if (file.size > 100 * 1024 * 1024) showError('大型檔案會使用較多瀏覽器記憶體；解析速度取決於裝置與模型複雜度。');
     setLoading('讀取檔案', '正在從您的裝置讀取檔案，不會上傳。');
@@ -136,7 +144,7 @@ async function openFile(file) {
     const meshes = await parseInWorker(buffer);
     setLoading('建立幾何', '正在建立 Three.js 模型。');
     clearModel();
-    const result = buildModel(meshes); model = result.group; scene.add(model); updateHelpers(); fitCamera();
+    const result = buildModel(meshes); setRenderDensity(result.triangles); model = result.group; scene.add(model); updateHelpers(); fitCamera();
     const dimensions = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3());
     $('#fileName').textContent = file.name; $('#meshes').textContent = meshes.length.toLocaleString(); $('#faces').textContent = Math.floor(result.triangles).toLocaleString();
     $('#size').textContent = `${formatSize(dimensions.x)} × ${formatSize(dimensions.y)} × ${formatSize(dimensions.z)}`;
@@ -147,7 +155,7 @@ async function openFile(file) {
     const message = /memory|abort|out of/i.test(error?.message) ? '記憶體不足，無法解析此模型。請關閉其他分頁、使用桌面瀏覽器或嘗試較小的檔案。' : (error?.message || 'STEP 解析失敗。');
     showError(message);
   } finally {
-    worker?.terminate(); worker = null; busy = false; fileInput.disabled = false; fileInput.value = ''; if (!model) stopLoading();
+    worker?.terminate(); worker = null; rejectActiveParse = null; busy = false; fileInput.disabled = false; $('#qualitySelect').disabled = false; fileInput.value = ''; if (!model) stopLoading();
   }
 }
 fileInput.addEventListener('change', () => openFile(fileInput.files[0]));
@@ -159,6 +167,11 @@ $('#axisBtn').addEventListener('click', () => { axes.visible = !axes.visible; $(
 $('#themeBtn').addEventListener('click', () => setBackgroundTheme(!lightBackground));
 $('#hideUiBtn').addEventListener('click', () => document.body.classList.add('ui-hidden'));
 $('#showUiBtn').addEventListener('click', () => document.body.classList.remove('ui-hidden'));
+$('#cancelLoadBtn').addEventListener('click', () => {
+  if (!busy) return;
+  worker?.terminate(); worker = null;
+  rejectActiveParse?.(new Error('已取消模型解析。'));
+});
 controls.addEventListener('start', () => { clearTimeout(interactionTimer); document.body.classList.add('interacting'); });
 controls.addEventListener('end', () => { clearTimeout(interactionTimer); interactionTimer = setTimeout(() => document.body.classList.remove('interacting'), 280); });
 for (const event of ['dragenter', 'dragover']) mainElement.addEventListener(event, (e) => { e.preventDefault(); if (!busy) dropZone.classList.add('dragging'); });

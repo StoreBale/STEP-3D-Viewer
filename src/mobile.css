@@ -12,3 +12,13 @@
     max-width: 92px;
   }
 }
+
+.cancel-load {
+  margin-top: 16px;
+  padding: 7px 12px;
+  border: 1px solid rgba(255, 255, 255, .2);
+  border-radius: 8px;
+  color: var(--text);
+  background: rgba(255, 255, 255, .06);
+  cursor: pointer;
+}
