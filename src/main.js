@@ -15,6 +15,8 @@ let model = null;
 let worker = null;
 let busy = false;
 let toastTimer;
+let interactionTimer;
+let lightBackground = false;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x090d12);
@@ -33,6 +35,21 @@ scene.add(new THREE.HemisphereLight(0xd9ecff, 0x5f7892, 2.4));
 const key = new THREE.DirectionalLight(0xffffff, 3.1); key.position.set(4, -5, 8); scene.add(key);
 const grid = new THREE.GridHelper(200, 20, 0x35536a, 0x1c2a35); grid.rotation.x = Math.PI / 2; scene.add(grid);
 const axes = new THREE.AxesHelper(25); scene.add(axes);
+
+function setBackgroundTheme(useLight) {
+  lightBackground = useLight;
+  const palette = useLight
+    ? { background: 0xe7edf3, fog: 0xe7edf3, gridMajor: 0x8da4b7, gridMinor: 0xc6d3de, sky: 0xffffff, ground: 0xaabccb, key: 2.8 }
+    : { background: 0x090d12, fog: 0x090d12, gridMajor: 0x35536a, gridMinor: 0x1c2a35, sky: 0xd9ecff, ground: 0x5f7892, key: 3.1 };
+  scene.background.setHex(palette.background); scene.fog.color.setHex(palette.fog);
+  const gridMaterials = Array.isArray(grid.material) ? grid.material : [grid.material];
+  gridMaterials[0].color.setHex(palette.gridMajor); gridMaterials[1]?.color.setHex(palette.gridMinor);
+  scene.children.find((item) => item.isHemisphereLight).color.setHex(palette.sky);
+  scene.children.find((item) => item.isHemisphereLight).groundColor.setHex(palette.ground);
+  key.intensity = palette.key;
+  $('#themeBtn').classList.toggle('active', useLight);
+  $('#themeBtn').title = useLight ? '切換深色背景' : '切換淺色背景';
+}
 
 function resize() { const { clientWidth: w, clientHeight: h } = viewer; camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setSize(w, h, false); }
 addEventListener('resize', resize); resize();
@@ -63,7 +80,12 @@ function fitCamera() {
 }
 function formatSize(value) { return value >= 1000 ? value.toFixed(0) : value >= 10 ? value.toFixed(1) : value.toFixed(2); }
 function qualityParams() {
-  return { draft: { linearDeflection: .004, angularDeflection: .45 }, balanced: { linearDeflection: .0015, angularDeflection: .28 }, fine: { linearDeflection: .00055, angularDeflection: .16 } }[$('#qualitySelect').value];
+  return {
+    draft: { linearDeflection: .004, angularDeflection: .45 },
+    balanced: { linearDeflection: .0015, angularDeflection: .28 },
+    fine: { linearDeflection: .00055, angularDeflection: .16 },
+    ultra: { linearDeflection: .0002, angularDeflection: .09 },
+  }[$('#qualitySelect').value];
 }
 function buildModel(meshes) {
   const group = new THREE.Group(); let triangles = 0;
@@ -118,6 +140,11 @@ $('#solidBtn').addEventListener('click', () => { model?.traverse((x) => { if (x.
 $('#wireBtn').addEventListener('click', () => { model?.traverse((x) => { if (x.isMesh) x.material.wireframe = true; }); $('#wireBtn').classList.add('active'); $('#solidBtn').classList.remove('active'); });
 $('#gridBtn').addEventListener('click', () => { grid.visible = !grid.visible; $('#gridBtn').classList.toggle('active', grid.visible); });
 $('#axisBtn').addEventListener('click', () => { axes.visible = !axes.visible; $('#axisBtn').classList.toggle('active', axes.visible); });
+$('#themeBtn').addEventListener('click', () => setBackgroundTheme(!lightBackground));
+$('#hideUiBtn').addEventListener('click', () => document.body.classList.add('ui-hidden'));
+$('#showUiBtn').addEventListener('click', () => document.body.classList.remove('ui-hidden'));
+controls.addEventListener('start', () => { clearTimeout(interactionTimer); document.body.classList.add('interacting'); });
+controls.addEventListener('end', () => { clearTimeout(interactionTimer); interactionTimer = setTimeout(() => document.body.classList.remove('interacting'), 280); });
 for (const event of ['dragenter', 'dragover']) mainElement.addEventListener(event, (e) => { e.preventDefault(); if (!busy) dropZone.classList.add('dragging'); });
 for (const event of ['dragleave', 'drop']) mainElement.addEventListener(event, (e) => { e.preventDefault(); dropZone.classList.remove('dragging'); });
 mainElement.addEventListener('drop', (event) => openFile(event.dataTransfer.files[0]));
