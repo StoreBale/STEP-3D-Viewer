@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: step-3d-viewer
+    runtime: docker
+    plan: free
+    region: singapore
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: MAX_UPLOAD_MB
+        value: "50"
