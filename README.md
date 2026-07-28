@@ -35,6 +35,8 @@ python main.py
 本專案包含 `Dockerfile` 與 `render.yaml`，可以直接從 GitHub 建立 Render
 Blueprint：
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/StoreBale/STEP-3D-Viewer)
+
 1. 將專案推送到 GitHub。
 2. 登入 [Render](https://dashboard.render.com/)。
 3. 選擇 **New → Blueprint**。
