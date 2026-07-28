@@ -20,13 +20,6 @@ outlineButton.title = '顯示模型輪廓線';
 outlineButton.setAttribute('aria-label', '顯示模型輪廓線');
 outlineButton.innerHTML = '<svg viewBox="0 0 24 24"><path d="m12 2 8 4.5v9L12 20l-8-4.5v-9L12 2Z"/><path d="M4 6.5 12 11l8-4.5M4 15.5 12 20l8-4.5M12 11v9"/></svg>';
 $('#wireBtn').insertAdjacentElement('afterend', outlineButton);
-const shadowButton = document.createElement('button');
-shadowButton.className = 'tool';
-shadowButton.type = 'button';
-shadowButton.title = '切換柔和陰影';
-shadowButton.setAttribute('aria-label', '切換柔和陰影');
-shadowButton.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6 2.1 2.1m0-12.8-2.1 2.1m-8.6 8.6-2.1 2.1"/><circle cx="12" cy="12" r="4"/></svg>';
-outlineButton.insertAdjacentElement('afterend', shadowButton);
 let model = null;
 let worker = null;
 let busy = false;
@@ -37,9 +30,6 @@ let backgroundBrightness = 1;
 let rejectActiveParse = null;
 let outlineGroup = null;
 let outlineVisible = false;
-// Keep shadows opt-in: some large imported assemblies can make a full shadow
-// pass appear overly dark on constrained mobile GPUs.
-let shadowsVisible = false;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x090d12);
@@ -50,18 +40,13 @@ camera.up.set(0, 0, 1);
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 viewer.append(renderer.domElement);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.target.set(0, 0, 0);
 const hemisphere = new THREE.HemisphereLight(0xd9ecff, 0x5f7892, 2.4); scene.add(hemisphere);
-const key = new THREE.DirectionalLight(0xffffff, 3.1); key.position.set(4, -5, 8); key.castShadow = true; scene.add(key);
-const keyTarget = new THREE.Object3D(); scene.add(keyTarget); key.target = keyTarget;
+const key = new THREE.DirectionalLight(0xffffff, 3.1); key.position.set(4, -5, 8); scene.add(key);
 const grid = new THREE.GridHelper(200, 20, 0x35536a, 0x1c2a35); grid.rotation.x = Math.PI / 2; scene.add(grid);
-const shadowGround = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.ShadowMaterial({ color: 0x000000, transparent: true, opacity: .26 }));
-shadowGround.receiveShadow = true; shadowGround.visible = false; scene.add(shadowGround);
 const axes = new THREE.AxesHelper(25); scene.add(axes);
 
 function setBackgroundTheme(useLight) {
@@ -156,22 +141,8 @@ function updateHelpers() {
   // grid underneath the imported part and scale both helpers to the model.
   grid.scale.setScalar(helperScale);
   grid.position.set(center.x, center.y, box.min.z - largestDimension * .003);
-  shadowGround.scale.setScalar(helperScale);
-  shadowGround.position.copy(grid.position);
-  shadowGround.visible = shadowsVisible;
   axes.scale.setScalar(helperScale);
   axes.position.set(box.min.x, box.min.y, box.min.z);
-
-  key.position.copy(center).add(new THREE.Vector3(largestDimension, -largestDimension * 1.2, largestDimension * 1.6));
-  keyTarget.position.copy(center); keyTarget.updateMatrixWorld();
-  const shadowRange = largestDimension * 1.25;
-  const shadowCamera = key.shadow.camera;
-  shadowCamera.left = shadowCamera.bottom = -shadowRange;
-  shadowCamera.right = shadowCamera.top = shadowRange;
-  shadowCamera.near = Math.max(largestDimension * .01, .01);
-  shadowCamera.far = largestDimension * 5;
-  shadowCamera.updateProjectionMatrix();
-  key.shadow.mapSize.set(largestDimension > 10000 ? 1024 : 2048);
 }
 function formatSize(value) { return value >= 1000 ? value.toFixed(0) : value >= 10 ? value.toFixed(1) : value.toFixed(2); }
 function qualityParams() {
@@ -190,7 +161,7 @@ function buildModel(meshes) {
     if (source.normal) geometry.setAttribute('normal', new THREE.BufferAttribute(source.normal, 3)); else geometry.computeVertexNormals();
     geometry.setIndex(new THREE.BufferAttribute(source.index, 1)); geometry.computeBoundingSphere();
     const material = new THREE.MeshStandardMaterial({ color: source.color ? new THREE.Color(...source.color) : 0xa4c4d7, metalness: .06, roughness: .48, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
-    const mesh = new THREE.Mesh(geometry, material); mesh.name = source.name; mesh.castShadow = true; mesh.receiveShadow = true; group.add(mesh); triangles += source.index.length / 3;
+    const mesh = new THREE.Mesh(geometry, material); mesh.name = source.name; group.add(mesh); triangles += source.index.length / 3;
   });
   return { group, triangles };
 }
@@ -243,11 +214,6 @@ $('#clearBtn').addEventListener('click', clearModel); $('#fitBtn').addEventListe
 $('#solidBtn').addEventListener('click', () => { model?.traverse((x) => { if (x.isMesh) x.material.wireframe = false; }); $('#solidBtn').classList.add('active'); $('#wireBtn').classList.remove('active'); });
 $('#wireBtn').addEventListener('click', () => { model?.traverse((x) => { if (x.isMesh) x.material.wireframe = true; }); $('#wireBtn').classList.add('active'); $('#solidBtn').classList.remove('active'); });
 outlineButton.addEventListener('click', () => setOutlines(!outlineVisible));
-shadowButton.addEventListener('click', () => {
-  shadowsVisible = !shadowsVisible;
-  shadowGround.visible = shadowsVisible && Boolean(model);
-  shadowButton.classList.toggle('active', shadowsVisible);
-});
 $('#gridBtn').addEventListener('click', () => { grid.visible = !grid.visible; $('#gridBtn').classList.toggle('active', grid.visible); });
 $('#axisBtn').addEventListener('click', () => { axes.visible = !axes.visible; $('#axisBtn').classList.toggle('active', axes.visible); });
 $('#themeBtn').addEventListener('click', () => setBackgroundTheme(!lightBackground));
