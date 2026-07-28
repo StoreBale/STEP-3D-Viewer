@@ -102,6 +102,7 @@ function qualityParams() {
     balanced: { linearDeflection: .0015, angularDeflection: .28 },
     fine: { linearDeflection: .00055, angularDeflection: .16 },
     ultra: { linearDeflection: .0002, angularDeflection: .09 },
+    maximum: { linearDeflection: .00005, angularDeflection: .035 },
   }[$('#qualitySelect').value];
 }
 function buildModel(meshes) {
@@ -138,6 +139,7 @@ async function openFile(file) {
   busy = true; fileInput.disabled = true; $('#qualitySelect').disabled = true;
   try {
     if (file.size > 100 * 1024 * 1024) showError('大型檔案會使用較多瀏覽器記憶體；解析速度取決於裝置與模型複雜度。');
+    if ($('#qualitySelect').value === 'maximum') showError('極致+ 會產生顯著更多三角形，可能需要較長時間與更多記憶體。');
     setLoading('讀取檔案', '正在從您的裝置讀取檔案，不會上傳。');
     const buffer = await file.arrayBuffer();
     setLoading('解析模型', 'OpenCascade WebAssembly 正在此瀏覽器內解析 STEP。');
