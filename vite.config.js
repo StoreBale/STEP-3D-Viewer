@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  plugins: [],
   base: './',
   worker: { format: 'es' },
   build: {
