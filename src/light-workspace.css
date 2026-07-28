@@ -1,0 +1,24 @@
+body.light-workspace {
+  color-scheme: light;
+  --bg: #e8eef3;
+  --panel: rgba(255, 255, 255, .86);
+  --panel-2: #f7fafc;
+  --line: rgba(36, 56, 72, .16);
+  --text: #152331;
+  --muted: #607282;
+  --accent: #1b9a7c;
+  background: radial-gradient(circle at 12% 7%, rgba(66, 165, 245, .14), transparent 30%), radial-gradient(circle at 88% 82%, rgba(43, 178, 142, .11), transparent 28%), var(--bg);
+}
+
+body.light-workspace header { background: rgba(247, 250, 252, .82); }
+body.light-workspace .brand-mark { color: #fff; background: linear-gradient(135deg, #1b9a7c, #59c99f); box-shadow: 0 0 25px rgba(27, 154, 124, .18); }
+body.light-workspace .button, body.light-workspace .quality-control { background: rgba(255, 255, 255, .7); }
+body.light-workspace .button.primary { color: #fff; background: #1b9a7c; }
+body.light-workspace .quality-control select { color: var(--text); background: transparent; }
+body.light-workspace .toolbar, body.light-workspace .info-card, body.light-workspace .privacy-note, body.light-workspace .brightness-control { box-shadow: 0 12px 35px rgba(28, 49, 64, .12); }
+body.light-workspace .tool.active { color: #147b65; background: rgba(27, 154, 124, .12); }
+body.light-workspace .drop-zone { border-color: rgba(27, 154, 124, .45); background: rgba(255, 255, 255, .75); box-shadow: 0 18px 55px rgba(43, 75, 95, .12); }
+body.light-workspace .drop-zone.dragging { border-color: #1b9a7c; background: rgba(222, 248, 239, .92); }
+body.light-workspace .upload-orbit { color: #1b9a7c; border-color: rgba(27, 154, 124, .28); background: rgba(27, 154, 124, .08); }
+body.light-workspace .loading { background: rgba(234, 241, 246, .72); }
+body.light-workspace .toast { background: rgba(114, 31, 42, .94); }
