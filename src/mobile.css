@@ -1,0 +1,14 @@
+@media (max-width: 620px) {
+  .quality-control {
+    display: flex;
+    padding: 0 6px;
+  }
+
+  .quality-control > span {
+    display: none;
+  }
+
+  .quality-control select {
+    max-width: 92px;
+  }
+}

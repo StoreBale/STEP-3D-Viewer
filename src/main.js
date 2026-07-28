@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import './style.css';
+import './mobile.css';
 
 const $ = (selector) => document.querySelector(selector);
 const viewer = $('#viewer');
