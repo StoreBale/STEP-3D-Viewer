@@ -18,6 +18,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Timer
+from urllib.parse import parse_qs, urlsplit
 
 
 IS_CLOUD = bool(os.environ.get("RENDER") or os.environ.get("CI"))
@@ -25,13 +26,19 @@ HOST = os.environ.get("HOST", "0.0.0.0" if IS_CLOUD else "127.0.0.1")
 PORT = int(os.environ.get("PORT", os.environ.get("STEP_VIEWER_PORT", "8000")))
 MAX_UPLOAD_MB = max(1, min(int(os.environ.get("MAX_UPLOAD_MB", "200")), 500))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+QUALITY_PRESETS = {
+    "draft": (0.004, 0.45),
+    "balanced": (0.0015, 0.28),
+    "fine": (0.00055, 0.16),
+    "ultra": (0.0002, 0.09),
+}
 
 
 INDEX_HTML = r"""<!doctype html>
 <html lang="zh-Hant">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>STEP 3D Viewer</title>
   <style>
     :root {
@@ -56,8 +63,12 @@ INDEX_HTML = r"""<!doctype html>
       color: var(--text);
       font-family: Inter, "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
     }
-    button, input { font: inherit; }
-    .app { display: grid; grid-template-rows: 68px 1fr; width: 100%; height: 100%; }
+    button, input, select { font: inherit; }
+    .app {
+      display: grid; grid-template-rows: 68px 1fr; width: 100%; height: 100%;
+      transition: grid-template-rows .18s;
+    }
+    @supports (height: 100dvh) { .app { height: 100dvh; } }
     header {
       z-index: 10; display: flex; align-items: center; justify-content: space-between;
       padding: 0 22px; border-bottom: 1px solid var(--line);
@@ -73,6 +84,15 @@ INDEX_HTML = r"""<!doctype html>
     .brand h1 { margin: 0; font-size: 16px; letter-spacing: .02em; }
     .brand p { margin: 2px 0 0; color: var(--muted); font-size: 11px; }
     .header-actions { display: flex; align-items: center; gap: 9px; }
+    .quality-control {
+      display: flex; align-items: center; gap: 7px; height: 38px; padding: 0 8px 0 11px;
+      border: 1px solid var(--line); border-radius: 10px; color: var(--muted);
+      background: rgba(255,255,255,.04); font-size: 11px;
+    }
+    .quality-control select {
+      max-width: 92px; border: 0; outline: 0; color: var(--text); background: var(--panel-2);
+      cursor: pointer;
+    }
     .button {
       display: inline-flex; align-items: center; justify-content: center; gap: 7px;
       min-height: 38px; padding: 0 14px; border: 1px solid var(--line); border-radius: 10px;
@@ -87,7 +107,10 @@ INDEX_HTML = r"""<!doctype html>
     #fileInput { display: none; }
     main { position: relative; min-height: 0; }
     #viewer { position: absolute; inset: 0; }
-    #viewer canvas { display: block; width: 100%; height: 100%; outline: none; }
+    #viewer canvas {
+      display: block; width: 100%; height: 100%; outline: none;
+      touch-action: none; -webkit-user-select: none; user-select: none;
+    }
     .toolbar {
       position: absolute; z-index: 4; top: 18px; left: 50%; transform: translateX(-50%);
       display: flex; gap: 4px; padding: 5px; border: 1px solid var(--line);
@@ -173,14 +196,53 @@ INDEX_HTML = r"""<!doctype html>
       pointer-events: none; transition: opacity .2s, transform .2s;
     }
     .toast.show { opacity: 1; transform: none; }
+    .ui-peek {
+      position: absolute; z-index: 30; top: max(13px, env(safe-area-inset-top)); right: 13px;
+      display: none; width: 42px; height: 42px; padding: 0; border: 1px solid var(--line);
+      border-radius: 12px; color: var(--accent); background: var(--panel);
+      box-shadow: 0 10px 30px rgba(0,0,0,.28); backdrop-filter: blur(12px); cursor: pointer;
+    }
+    .ui-peek svg { width: 18px; height: 18px; }
+    header, .toolbar, .info-card, .help, .drop-zone {
+      transition: opacity .18s, transform .18s;
+    }
+    body.interacting header, body.interacting .toolbar, body.interacting .info-card,
+    body.interacting .help, body.interacting .drop-zone,
+    body.ui-hidden header, body.ui-hidden .toolbar, body.ui-hidden .info-card,
+    body.ui-hidden .help, body.ui-hidden .drop-zone {
+      pointer-events: none; opacity: 0;
+    }
+    body.interacting header, body.ui-hidden header { transform: translateY(-10px); }
+    body.interacting .toolbar, body.ui-hidden .toolbar { transform: translate(-50%, -8px); }
+    body.interacting .info-card, body.ui-hidden .info-card { transform: translateY(8px); }
+    body.ui-hidden .ui-peek { display: grid; place-items: center; pointer-events: auto; opacity: 1; }
+    body.ui-hidden .app { grid-template-rows: 0 1fr; }
     @keyframes spin { to { transform: rotate(360deg); } }
     @keyframes progress { 0% { transform: translateX(-110%); } 100% { transform: translateX(270%); } }
     @media (max-width: 620px) {
-      header { padding: 0 13px; }
-      .brand p, .header-actions .desktop-label, .help { display: none; }
+      .app { grid-template-rows: calc(62px + env(safe-area-inset-top)) 1fr; }
+      header { padding: env(safe-area-inset-top) 10px 0; }
+      .brand p, .header-actions .desktop-label, .quality-control > span, .help { display: none; }
+      .brand { gap: 8px; }
+      .brand-mark { width: 34px; height: 34px; }
+      .brand h1 { font-size: 13px; }
       .button { padding: 0 11px; }
-      .toolbar { top: 12px; }
-      .info-card { left: 12px; bottom: 12px; }
+      .quality-control { padding: 0 7px; }
+      .quality-control select { width: 72px; font-size: 11px; }
+      .toolbar { top: 10px; max-width: calc(100% - 18px); }
+      .tool { width: 36px; }
+      .info-card {
+        left: 10px; bottom: max(10px, env(safe-area-inset-bottom));
+        width: min(300px, calc(100% - 20px)); padding: 12px;
+      }
+      .drop-zone { padding: 30px 18px; }
+      .drop-zone h2 { font-size: 18px; }
+      .drop-zone p br { display: none; }
+    }
+    @media (max-width: 400px) {
+      .header-actions { gap: 5px; }
+      .brand h1, .upload-label { display: none; }
+      .button { min-width: 38px; padding: 0 10px; }
     }
   </style>
   <script type="importmap">
@@ -204,13 +266,22 @@ INDEX_HTML = r"""<!doctype html>
         <div><h1>STEP 3D Viewer</h1><p>互動式 CAD 模型檢視器</p></div>
       </div>
       <div class="header-actions">
+        <label class="quality-control" title="曲面三角化精細度">
+          <span>精細度</span>
+          <select id="qualitySelect">
+            <option value="draft">快速</option>
+            <option value="balanced">標準</option>
+            <option value="fine" selected>精細</option>
+            <option value="ultra">極致</option>
+          </select>
+        </label>
         <button class="button" id="clearBtn" hidden title="關閉目前模型">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-3h4l1 3m3 0-1 14H7L6 7"/></svg>
           <span class="desktop-label">關閉</span>
         </button>
         <label class="button primary" for="fileInput">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 16V4m0 0L7 9m5-5 5 5M4 15v5h16v-5"/></svg>
-          開啟模型
+          <span class="upload-label">開啟模型</span>
         </label>
         <input id="fileInput" type="file" accept=".stp,.step">
       </div>
@@ -234,6 +305,9 @@ INDEX_HTML = r"""<!doctype html>
         <div class="divider"></div>
         <button class="tool" id="fitBtn" title="重設視角">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 3H3v5m13-5h5v5M8 21H3v-5m13 5h5v-5"/></svg>
+        </button>
+        <button class="tool" id="hideUiBtn" title="隱藏介面">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/><path d="m4 4 16 16"/></svg>
         </button>
       </div>
       <section class="drop-zone" id="dropZone">
@@ -266,13 +340,16 @@ INDEX_HTML = r"""<!doctype html>
         </div>
       </div>
       <div class="toast" id="toast"></div>
+      <button class="ui-peek" id="showUiBtn" title="顯示介面">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/></svg>
+      </button>
     </main>
   </div>
 
   <script type="module">
     import * as THREE from 'three';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-    import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
     const viewer = document.querySelector('#viewer');
     const main = document.querySelector('#main');
@@ -285,6 +362,7 @@ INDEX_HTML = r"""<!doctype html>
     const wireBtn = document.querySelector('#wireBtn');
     const gridBtn = document.querySelector('#gridBtn');
     const axisBtn = document.querySelector('#axisBtn');
+    const qualitySelect = document.querySelector('#qualitySelect');
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x090d12);
@@ -325,10 +403,7 @@ INDEX_HTML = r"""<!doctype html>
     let model = null;
     let modelSize = 100;
     let toastTimer = null;
-    const material = new THREE.MeshPhysicalMaterial({
-      color: 0x82b8d8, metalness: .12, roughness: .32, clearcoat: .22,
-      clearcoatRoughness: .55, side: THREE.DoubleSide
-    });
+    let interactionTimer = null;
 
     function resize() {
       const w = viewer.clientWidth, h = viewer.clientHeight;
@@ -354,7 +429,21 @@ INDEX_HTML = r"""<!doctype html>
     function clearModel() {
       if (model) {
         scene.remove(model);
-        model.geometry.dispose();
+        const geometries = new Set(), materials = new Set(), textures = new Set();
+        model.traverse(object => {
+          if (object.geometry) geometries.add(object.geometry);
+          const list = Array.isArray(object.material) ? object.material : [object.material];
+          for (const mat of list) {
+            if (!mat) continue;
+            materials.add(mat);
+            for (const value of Object.values(mat)) {
+              if (value && value.isTexture) textures.add(value);
+            }
+          }
+        });
+        geometries.forEach(item => item.dispose());
+        materials.forEach(item => item.dispose());
+        textures.forEach(item => item.dispose());
         model = null;
       }
       infoCard.classList.add('hidden');
@@ -400,35 +489,51 @@ INDEX_HTML = r"""<!doctype html>
       const form = new FormData();
       form.append('model', file);
       try {
-        const response = await fetch('/api/convert', { method: 'POST', body: form });
+        const quality = encodeURIComponent(qualitySelect.value);
+        const response = await fetch(`/api/convert?quality=${quality}`, { method: 'POST', body: form });
         if (!response.ok) {
           let detail = await response.text();
           try { detail = JSON.parse(detail).error || detail; } catch (_) {}
           throw new Error(detail || `伺服器錯誤 ${response.status}`);
         }
         const buffer = await response.arrayBuffer();
-        const geometry = new STLLoader().parse(buffer);
-        geometry.computeVertexNormals();
-        geometry.computeBoundingBox();
-        const box = geometry.boundingBox;
+        const gltf = await new GLTFLoader().parseAsync(buffer, '');
+        if (model) clearModel();
+        model = gltf.scene;
+        model.rotation.x = Math.PI / 2;
+        model.updateMatrixWorld(true);
+        let box = new THREE.Box3().setFromObject(model);
         const center = box.getCenter(new THREE.Vector3());
+        model.position.x -= center.x;
+        model.position.y -= center.y;
+        model.position.z -= box.min.z;
+        model.updateMatrixWorld(true);
+        box = new THREE.Box3().setFromObject(model);
         const dims = box.getSize(new THREE.Vector3());
-        geometry.translate(-center.x, -center.y, -center.z + dims.z / 2);
-
-        if (model) {
-          scene.remove(model);
-          model.geometry.dispose();
-        }
-        model = new THREE.Mesh(geometry, material);
-        model.castShadow = true;
-        model.receiveShadow = true;
+        let vertices = 0, faces = 0;
+        model.traverse(object => {
+          if (!object.isMesh || !object.geometry) return;
+          object.castShadow = true;
+          object.receiveShadow = true;
+          const position = object.geometry.attributes.position;
+          if (position) vertices += position.count;
+          faces += object.geometry.index
+            ? object.geometry.index.count / 3
+            : (position ? position.count / 3 : 0);
+          const list = Array.isArray(object.material) ? object.material : [object.material];
+          for (const mat of list) {
+            if (mat) {
+              mat.side = THREE.DoubleSide;
+              mat.needsUpdate = true;
+            }
+          }
+        });
         scene.add(model);
         updateHelpers(Math.max(dims.x, dims.y, dims.z));
         fitCamera();
 
-        const vertices = geometry.attributes.position.count;
         document.querySelector('#fileName').textContent = file.name;
-        document.querySelector('#faces').textContent = Math.floor(vertices / 3).toLocaleString();
+        document.querySelector('#faces').textContent = Math.floor(faces).toLocaleString();
         document.querySelector('#vertices').textContent = vertices.toLocaleString();
         const fmt = n => n >= 1000 ? n.toFixed(0) : n >= 10 ? n.toFixed(1) : n.toFixed(2);
         document.querySelector('#size').textContent = `${fmt(dims.x)} × ${fmt(dims.y)} × ${fmt(dims.z)}`;
@@ -447,16 +552,38 @@ INDEX_HTML = r"""<!doctype html>
     document.querySelector('#clearBtn').addEventListener('click', clearModel);
     document.querySelector('#fitBtn').addEventListener('click', fitCamera);
     solidBtn.addEventListener('click', () => {
-      material.wireframe = false; solidBtn.classList.add('active'); wireBtn.classList.remove('active');
+      if (model) model.traverse(object => {
+        const list = Array.isArray(object.material) ? object.material : [object.material];
+        list.forEach(mat => { if (mat) { mat.wireframe = false; mat.needsUpdate = true; } });
+      });
+      solidBtn.classList.add('active'); wireBtn.classList.remove('active');
     });
     wireBtn.addEventListener('click', () => {
-      material.wireframe = true; wireBtn.classList.add('active'); solidBtn.classList.remove('active');
+      if (model) model.traverse(object => {
+        const list = Array.isArray(object.material) ? object.material : [object.material];
+        list.forEach(mat => { if (mat) { mat.wireframe = true; mat.needsUpdate = true; } });
+      });
+      wireBtn.classList.add('active'); solidBtn.classList.remove('active');
     });
     gridBtn.addEventListener('click', () => {
       grid.visible = !grid.visible; gridBtn.classList.toggle('active', grid.visible);
     });
     axisBtn.addEventListener('click', () => {
       axes.visible = !axes.visible; axisBtn.classList.toggle('active', axes.visible);
+    });
+    document.querySelector('#hideUiBtn').addEventListener('click', () => {
+      document.body.classList.add('ui-hidden');
+    });
+    document.querySelector('#showUiBtn').addEventListener('click', () => {
+      document.body.classList.remove('ui-hidden');
+    });
+    controls.addEventListener('start', () => {
+      clearTimeout(interactionTimer);
+      document.body.classList.add('interacting');
+    });
+    controls.addEventListener('end', () => {
+      clearTimeout(interactionTimer);
+      interactionTimer = setTimeout(() => document.body.classList.remove('interacting'), 280);
     });
 
     for (const event of ['dragenter', 'dragover']) {
@@ -513,9 +640,19 @@ def _extract_upload(content_type: str, body: bytes) -> tuple[str, bytes]:
     raise RequestError("找不到上傳的模型檔案。")
 
 
-def _step_to_stl(step_data: bytes, suffix: str) -> bytes:
+def _step_to_glb(step_data: bytes, suffix: str, quality: str = "fine") -> bytes:
+    """Read STEP colors/assembly data with XCAF and export a meshed binary glTF."""
     try:
-        import cadquery as cq
+        from OCP.Bnd import Bnd_Box
+        from OCP.BRepBndLib import BRepBndLib
+        from OCP.BRepMesh import BRepMesh_IncrementalMesh
+        from OCP.Message import Message_ProgressRange
+        from OCP.RWGltf import RWGltf_CafWriter
+        from OCP.STEPCAFControl import STEPCAFControl_Reader
+        from OCP.TCollection import TCollection_AsciiString, TCollection_ExtendedString
+        from OCP.TColStd import TColStd_IndexedDataMapOfStringString
+        from OCP.TDocStd import TDocStd_Document
+        from OCP.XCAFDoc import XCAFDoc_DocumentTool
     except ImportError as exc:
         raise RequestError(
             "尚未安裝 CadQuery。請關閉伺服器後，在 .venv 中執行："
@@ -524,19 +661,53 @@ def _step_to_stl(step_data: bytes, suffix: str) -> bytes:
 
     with tempfile.TemporaryDirectory(prefix="step-viewer-") as temp_dir:
         input_path = Path(temp_dir) / f"input{suffix}"
-        output_path = Path(temp_dir) / "model.stl"
+        output_path = Path(temp_dir) / "model.glb"
         input_path.write_bytes(step_data)
         try:
-            shape = cq.importers.importStep(str(input_path))
-            if shape is None or shape.val() is None:
+            document = TDocStd_Document(TCollection_ExtendedString("BinXCAF"))
+            reader = STEPCAFControl_Reader()
+            reader.SetColorMode(True)
+            reader.SetNameMode(True)
+            reader.SetLayerMode(True)
+            reader.SetPropsMode(True)
+            if not reader.Perform(str(input_path), document):
+                raise ValueError("OpenCascade 無法讀取這個 STEP 檔案")
+
+            shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
+            shape = shape_tool.GetOneShape()
+            if shape.IsNull():
                 raise ValueError("STEP 檔案中沒有可顯示的實體")
-            cq.exporters.export(
-                shape,
-                str(output_path),
-                exportType="STL",
-                tolerance=0.08,
-                angularTolerance=0.12,
+
+            bounds = Bnd_Box()
+            BRepBndLib.Add_s(shape, bounds)
+            x_min, y_min, z_min, x_max, y_max, z_max = bounds.Get()
+            diagonal = (
+                (x_max - x_min) ** 2
+                + (y_max - y_min) ** 2
+                + (z_max - z_min) ** 2
+            ) ** 0.5
+            relative_deflection, angular_deflection = QUALITY_PRESETS.get(
+                quality, QUALITY_PRESETS["fine"]
             )
+            linear_deflection = max(diagonal * relative_deflection, 1e-6)
+
+            mesher = BRepMesh_IncrementalMesh(
+                shape,
+                linear_deflection,
+                False,
+                angular_deflection,
+                True,
+            )
+            mesher.Perform()
+            if not mesher.IsDone():
+                raise ValueError("曲面三角化失敗")
+
+            writer = RWGltf_CafWriter(TCollection_AsciiString(str(output_path)), True)
+            writer.SetParallel(True)
+            writer.SetMergeFaces(False)
+            file_info = TColStd_IndexedDataMapOfStringString()
+            if not writer.Perform(document, file_info, Message_ProgressRange()):
+                raise ValueError("GLB 輸出失敗")
             return output_path.read_bytes()
         except Exception as exc:
             raise RequestError(f"STEP 解析失敗：{exc}") from exc
@@ -572,11 +743,15 @@ class StepViewerHandler(BaseHTTPRequestHandler):
             self._send_error_text(HTTPStatus.NOT_FOUND, "找不到頁面。")
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path.split("?", 1)[0] != "/api/convert":
+        request_url = urlsplit(self.path)
+        if request_url.path != "/api/convert":
             self._send_error_text(HTTPStatus.NOT_FOUND, "找不到 API。")
             return
 
         try:
+            quality = parse_qs(request_url.query).get("quality", ["fine"])[0]
+            if quality not in QUALITY_PRESETS:
+                raise RequestError("未知的精細度設定。")
             content_type = self.headers.get("Content-Type", "")
             if not content_type.lower().startswith("multipart/form-data"):
                 raise RequestError("請使用 multipart/form-data 上傳檔案。")
@@ -607,8 +782,8 @@ class StepViewerHandler(BaseHTTPRequestHandler):
                 )
                 return
 
-            stl_data = _step_to_stl(step_data, suffix)
-            self._send(HTTPStatus.OK, stl_data, "model/stl")
+            glb_data = _step_to_glb(step_data, suffix, quality)
+            self._send(HTTPStatus.OK, glb_data, "model/gltf-binary")
         except RequestError as exc:
             self._send_error_text(HTTPStatus.BAD_REQUEST, str(exc))
         except (ValueError, OverflowError):
