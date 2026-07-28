@@ -1,0 +1,26 @@
+.brightness-control {
+  position: absolute;
+  z-index: 4;
+  top: 18px;
+  right: 18px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+  background: var(--panel);
+  box-shadow: 0 12px 35px rgba(0, 0, 0, .22);
+  backdrop-filter: blur(12px);
+  font-size: 11px;
+  transition: opacity .18s, transform .18s;
+}
+
+.brightness-control input { width: 100px; accent-color: var(--accent); }
+body.interacting .brightness-control, body.ui-hidden .brightness-control { pointer-events: none; opacity: 0; transform: translateY(-8px); }
+
+@media (max-width: 620px) {
+  .brightness-control { top: auto; right: 10px; bottom: 10px; }
+  .brightness-control input { width: 78px; }
+}

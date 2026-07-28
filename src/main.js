@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import './style.css';
 import './mobile.css';
+import './brightness.css';
 
 const $ = (selector) => document.querySelector(selector);
 const viewer = $('#viewer');
@@ -18,6 +19,7 @@ let busy = false;
 let toastTimer;
 let interactionTimer;
 let lightBackground = false;
+let backgroundBrightness = 1;
 let rejectActiveParse = null;
 
 const scene = new THREE.Scene();
@@ -33,7 +35,7 @@ viewer.append(renderer.domElement);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.target.set(0, 0, 0);
-scene.add(new THREE.HemisphereLight(0xd9ecff, 0x5f7892, 2.4));
+const hemisphere = new THREE.HemisphereLight(0xd9ecff, 0x5f7892, 2.4); scene.add(hemisphere);
 const key = new THREE.DirectionalLight(0xffffff, 3.1); key.position.set(4, -5, 8); scene.add(key);
 const grid = new THREE.GridHelper(200, 20, 0x35536a, 0x1c2a35); grid.rotation.x = Math.PI / 2; scene.add(grid);
 const axes = new THREE.AxesHelper(25); scene.add(axes);
@@ -43,15 +45,25 @@ function setBackgroundTheme(useLight) {
   const palette = useLight
     ? { background: 0xe7edf3, fog: 0xe7edf3, gridMajor: 0x8da4b7, gridMinor: 0xc6d3de, sky: 0xffffff, ground: 0xaabccb, key: 2.8 }
     : { background: 0x090d12, fog: 0x090d12, gridMajor: 0x35536a, gridMinor: 0x1c2a35, sky: 0xd9ecff, ground: 0x5f7892, key: 3.1 };
-  scene.background.setHex(palette.background); scene.fog.color.setHex(palette.fog);
+  const adjust = (hex) => new THREE.Color(hex).multiplyScalar(backgroundBrightness);
+  scene.background.copy(adjust(palette.background)); scene.fog.color.copy(adjust(palette.fog));
   const gridMaterials = Array.isArray(grid.material) ? grid.material : [grid.material];
-  gridMaterials[0].color.setHex(palette.gridMajor); gridMaterials[1]?.color.setHex(palette.gridMinor);
-  scene.children.find((item) => item.isHemisphereLight).color.setHex(palette.sky);
-  scene.children.find((item) => item.isHemisphereLight).groundColor.setHex(palette.ground);
+  gridMaterials[0].color.copy(adjust(palette.gridMajor)); gridMaterials[1]?.color.copy(adjust(palette.gridMinor));
+  hemisphere.color.copy(adjust(palette.sky)); hemisphere.groundColor.copy(adjust(palette.ground));
   key.intensity = palette.key;
   $('#themeBtn').classList.toggle('active', useLight);
   $('#themeBtn').title = useLight ? '切換深色背景' : '切換淺色背景';
 }
+
+const brightnessControl = document.createElement('label');
+brightnessControl.className = 'brightness-control';
+brightnessControl.innerHTML = '<span>背景亮度</span><input id="backgroundBrightness" type="range" min="35" max="140" value="100" aria-label="背景亮度">';
+mainElement.append(brightnessControl);
+const brightnessInput = brightnessControl.querySelector('input');
+brightnessInput.addEventListener('input', () => {
+  backgroundBrightness = Number(brightnessInput.value) / 100;
+  setBackgroundTheme(lightBackground);
+});
 
 function resize() { const { clientWidth: w, clientHeight: h } = viewer; camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setSize(w, h, false); }
 addEventListener('resize', resize); resize();
