@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="私密、瀏覽器端的 STEP 3D 檢視器" />
+    <title>STEP 3D Viewer</title>
+  </head>
+  <body>
+    <div class="app">
+      <header>
+        <div class="brand"><span class="brand-mark">3D</span><div><h1>STEP 3D Viewer</h1><p>私密的瀏覽器端 CAD 檢視器</p></div></div>
+        <div class="header-actions">
+          <label class="quality-control">品質<select id="qualitySelect"><option value="draft">草稿（較快）</option><option value="balanced" selected>平衡</option><option value="fine">精細</option></select></label>
+          <button class="button" id="clearBtn" hidden>清除</button>
+          <label class="button primary" for="fileInput">選擇 STEP 檔<input id="fileInput" type="file" accept=".stp,.step" hidden /></label>
+        </div>
+      </header>
+      <main id="main">
+        <div id="viewer"></div>
+        <nav class="toolbar" aria-label="檢視工具">
+          <button class="tool active" id="solidBtn" title="實體顯示">實體</button><button class="tool" id="wireBtn" title="線框顯示">線框</button><i></i>
+          <button class="tool active" id="gridBtn" title="格線">格線</button><button class="tool active" id="axisBtn" title="座標軸">座標</button><i></i>
+          <button class="tool" id="fitBtn" title="適應畫面">置中</button><button class="tool" id="resetBtn" title="重設視角">重設</button>
+        </nav>
+        <section class="drop-zone" id="dropZone">
+          <div class="upload-orbit">↑</div><h2>開啟 STEP 模型</h2>
+          <p>拖曳 <b>.stp</b> 或 <b>.step</b> 檔案到這裡，或按下方按鈕選擇檔案。</p>
+          <label class="button primary" for="fileInput">選擇本機檔案</label>
+          <small>檔案只在您的瀏覽器中處理，不會上傳至伺服器。</small>
+        </section>
+        <section class="info-card hidden" id="infoCard"><div class="file-name" id="fileName"></div><div class="file-state">已在此裝置完成解析</div><div class="stats"><div><span>網格</span><strong id="meshes">—</strong></div><div><span>三角形</span><strong id="faces">—</strong></div><div><span>尺寸 XYZ</span><strong id="size">—</strong></div></div></section>
+        <section class="privacy-note">STEP 檔案不會離開您的裝置</section>
+        <section class="loading hidden" id="loading" aria-live="polite"><div class="loading-box"><div class="loader"></div><strong id="loadingTitle">讀取檔案</strong><p id="loadingNote">正在準備本機解析器…</p><div class="progress"><i></i></div></div></section>
+        <div class="toast" id="toast" role="alert"></div>
+      </main>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

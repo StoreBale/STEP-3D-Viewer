@@ -1,64 +1,55 @@
 # STEP 3D Viewer
 
-使用 Python、CadQuery/OpenCascade 與 Three.js，在瀏覽器中互動查看
-`.stp` / `.step` 3D 模型。
+一個完全在瀏覽器中執行的 STEP/STP 3D 檢視器。選取的 CAD 檔案只會留在使用者的裝置；網站不提供上傳 API、後端、Pages Functions、Workers 或 R2。
 
-## 功能
+## 架構
 
-- 拖放或選擇 STEP/STP 檔案
-- 讀取 STEP/XCAF 的零件及曲面原色，轉換成帶材質的 GLB
-- 快速、標準、精細、極致四段曲面三角化精細度
-- 旋轉、平移、縮放與自動置中
-- 實體／線框模式
-- 格線、座標軸、模型尺寸與網格統計
-- 操作模型時自動隱藏介面，也可手動切換沉浸檢視
-- 支援手機觸控、動態視窗高度與安全區域
-- 原始檔案僅在暫存目錄中轉換，完成後自動刪除
+| 原本 | 現在 |
+| --- | --- |
+| Python `main.py` + CadQuery/OpenCascade | Vite 靜態網站 + `occt-import-js` WebAssembly |
+| 瀏覽器上傳 STEP 到 Render `/api/convert` | 檔案以 `ArrayBuffer` 交給本機 Web Worker |
+| Render Docker Web Service 轉成 GLB | Worker 內的 OpenCascade WASM 產生 Three.js geometry |
+| 50 MB 伺服器端上傳限制 | 沒有固定檔案大小拒絕限制；取決於裝置記憶體與模型複雜度 |
 
-## 使用 `.venv` 在本機執行
+`occt-import-js` 是成熟的 OpenCascade 匯入 WASM 封裝，原生支援 STEP，輸出網格結構與 Three.js 相容；解析會在 Worker 中進行，避免長時間阻塞介面。它的 WASM 約 7.6 MB，低於 Cloudflare Pages 的單一靜態資產 25 MiB 限制。
 
-Windows PowerShell：
+## 本機開發
+
+需求：Node.js 20 或更新版本。
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-python main.py
+npm install
+npm run dev
 ```
 
-如果 PowerShell 不允許執行啟用腳本，不需要修改系統設定，直接使用：
+開啟終端顯示的本機網址。正式建置與預覽：
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe main.py
+npm run build
+npm run preview
 ```
 
-瀏覽器會開啟 <http://127.0.0.1:8000>。
+`npm run build` 會把 OpenCascade 的 JavaScript 與 WASM 靜態資產複製到 `dist/vendor/`。第一次開啟網站需要下載 WASM；下載完成並被瀏覽器快取後，即使離線仍可對本機 STEP 檔案進行處理。清除快取或第一次離線開啟時，WASM 無法載入是預期行為。
 
-## 部署到 Render
+## Cloudflare Pages
 
-本專案包含 `Dockerfile` 與 `render.yaml`，可以直接從 GitHub 建立 Render
-Blueprint：
+在 Cloudflare Dashboard 選擇 **Workers & Pages → Create application → Pages → Connect to Git**，連結此 GitHub repository，並填寫：
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/StoreBale/STEP-3D-Viewer)
+| 設定 | 值 |
+| --- | --- |
+| Framework preset | `Vite`（或 `None`，使用下方指令） |
+| Production branch | `main` |
+| Build command | `npm run build` |
+| Build output directory | `dist` |
+| Node.js version | `20`（建議） |
+| Environment variables | 不需要 |
 
-1. 將專案推送到 GitHub。
-2. 登入 [Render](https://dashboard.render.com/)。
-3. 選擇 **New → Blueprint**。
-4. 連接 GitHub repository，Render 會讀取 `render.yaml` 並建立服務。
-5. 部署完成後使用 Render 提供的 `onrender.com` 網址。
+每次推送到 `main`，Cloudflare Pages 都會建立新的部署。這是純靜態網站，沒有機密環境變數、付費 API 或 server-side code。Vite 使用相對 `base`，因此 Pages 的正式網址與 preview 網址皆會使用正確的 Worker/WASM 路徑；單頁首頁重新整理也會回傳靜態 `index.html`。
 
-每次推送到預設分支，Render 都會自動重新建置與部署。
+## 隱私、效能與限制
 
-> 雲端預設限制單檔 50 MB，可在 Render 的 `MAX_UPLOAD_MB` 環境變數調整。
-> 「極致」精細度及複雜 STEP 模型的記憶體需求較高，雲端環境可能需要升級執行個體。
-
-## 環境變數
-
-| 名稱 | 預設值 | 說明 |
-| --- | --- | --- |
-| `HOST` | 本機 `127.0.0.1`、雲端 `0.0.0.0` | 監聽位址 |
-| `PORT` | `8000` | HTTP 連接埠；Render 會自動提供 |
-| `MAX_UPLOAD_MB` | 本機 `200` | 單一模型上傳限制 |
-| `STEP_VIEWER_NO_BROWSER` | `0` | 設為 `1` 時不自動開啟瀏覽器 |
-
-首次載入頁面需要網路連線，以取得 Three.js 前端模組。
+- 網頁只會從 Cloudflare 靜態資產下載前端程式與 WASM。選取 STEP 後，程式未呼叫 `fetch`、XHR 或 form upload，也沒有 `/api/convert`。
+- 解析時以 Transferable `ArrayBuffer` 把檔案交給 Worker；完成或失敗後 Worker 都會終止，替換模型也會釋放舊 geometry、material 與 texture。
+- 大型或複雜的模型可能耗用大量 RAM；建議桌面版 Chrome 或 Edge。大型檔案會顯示效能提醒而不是以固定大小拒絕。
+- `occt-import-js` 依其 LGPL-2.1 授權發佈；發佈時請保留其套件附帶的授權檔。
+- Repository 未包含可自由發布的 STEP 測試檔。請自行提供授權允許的 `.stp`/`.step` 檔案驗證模型結果。

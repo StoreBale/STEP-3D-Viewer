@@ -1,3 +1,0 @@
-# CadQuery bundles the OpenCascade geometry kernel used to read STEP files.
-# Python 3.11 is recommended on Windows.
-cadquery==2.6.1

@@ -1,0 +1,21 @@
+{
+  "name": "step-3d-viewer",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/copy-occt-assets.mjs && vite",
+    "build": "node scripts/copy-occt-assets.mjs && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "occt-import-js": "0.0.23",
+    "three": "0.167.1"
+  },
+  "devDependencies": {
+    "vite": "5.4.19"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

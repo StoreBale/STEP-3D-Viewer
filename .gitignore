@@ -21,3 +21,9 @@ Thumbs.db
 *.stp
 *.step
 *.stl
+
+# JavaScript build artefacts
+node_modules/
+dist/
+public/vendor/occt-import-js.js
+public/vendor/occt-import-js.wasm
