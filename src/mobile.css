@@ -1,24 +1,30 @@
-@media (max-width: 620px) {
-  .quality-control {
-    display: flex;
-    padding: 0 6px;
+@media (max-width: 650px) {
+  .model-name {
+    top: 15px;
+    left: 18px;
+    max-width: 65%;
+    overflow: hidden;
+    font-size: 16px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-
-  .quality-control > span {
-    display: none;
+  .view-cube {
+    top: max(12px, env(safe-area-inset-top));
+    right: max(12px, env(safe-area-inset-right));
+    transform: scale(.82);
+    transform-origin: top right;
   }
-
-  .quality-control select {
-    max-width: 92px;
+  .basic-toolbar {
+    bottom: max(10px, env(safe-area-inset-bottom));
+    width: calc(100% - 20px);
+    justify-content: center;
+    padding: 4px;
   }
-}
-
-.cancel-load {
-  margin-top: 16px;
-  padding: 7px 12px;
-  border: 1px solid rgba(255, 255, 255, .2);
-  border-radius: 8px;
-  color: var(--text);
-  background: rgba(255, 255, 255, .06);
-  cursor: pointer;
+  .basic-toolbar button {
+    min-width: 0;
+    flex: 1;
+    padding: 5px 2px;
+  }
+  .basic-toolbar span { font-size: 9px; }
+  .toolbar-reveal { bottom: max(10px, env(safe-area-inset-bottom)); }
 }
