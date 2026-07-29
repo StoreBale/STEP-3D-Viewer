@@ -480,7 +480,7 @@ function selectFace(event) {
 
 renderer.domElement.addEventListener('pointerdown', (event) => {
   if (event.button === 0) clickStart = { x: event.clientX, y: event.clientY };
-  if (event.button === 0 || event.button === 2) {
+  if (event.pointerType !== 'touch' && (event.button === 0 || event.button === 2)) {
     distanceLock = {
       id: event.pointerId,
       distance: camera.position.distanceTo(controls.target),
